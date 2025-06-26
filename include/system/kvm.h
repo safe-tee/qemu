@@ -213,6 +213,9 @@ int kvm_on_sigbus(int code, void *addr);
 int kvm_check_extension(KVMState *s, unsigned int extension);
 
 int kvm_vm_ioctl(KVMState *s, unsigned long type, ...);
+int kvm_vm_plane_ioctl(KVMState *s, unsigned plane_id, unsigned long type, ...);
+
+int kvm_get_or_create_plane_fd(KVMState *s, unsigned id);
 
 void kvm_flush_coalesced_mmio_buffer(void);
 

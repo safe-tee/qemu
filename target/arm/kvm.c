@@ -134,7 +134,7 @@ bool kvm_arm_create_scratch_host_vcpu(int *fdarray,
         KVMState kvm_state;
 
         kvm_state.fd = kvmfd;
-        kvm_state.vmfd = vmfd;
+        kvm_set_vm_fd(&kvm_state, vmfd);
         kvm_vm_enable_cap(&kvm_state, KVM_CAP_ARM_MTE, 0);
     }
 
