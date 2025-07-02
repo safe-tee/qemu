@@ -101,6 +101,14 @@ struct KVMDirtyRingReaper {
     volatile uint64_t reaper_iteration; /* iteration number of reaper thr */
     volatile enum KVMDirtyRingReaperState reaper_state; /* reap thr state */
 };
+
+/* VCPU per-plane state */
+struct KVMPlane {
+    int kvm_fd;
+    int kvm_vcpu_stats_fd;
+    bool vcpu_dirty;
+};
+
 struct KVMState
 {
     AccelState parent_obj;

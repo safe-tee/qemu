@@ -174,10 +174,12 @@ typedef struct KVMCapabilityInfo {
 #define KVM_CAP_INFO(CAP) { "KVM_CAP_" stringify(CAP), KVM_CAP_##CAP }
 #define KVM_CAP_LAST_INFO { NULL, 0 }
 
+struct KVMPlane;
 struct KVMState;
 
 #define TYPE_KVM_ACCEL ACCEL_CLASS_NAME("kvm")
 typedef struct KVMState KVMState;
+typedef struct KVMPlane KVMPlane;
 DECLARE_INSTANCE_CHECKER(KVMState, KVM_STATE,
                          TYPE_KVM_ACCEL)
 
@@ -216,6 +218,7 @@ int kvm_vm_ioctl(KVMState *s, unsigned long type, ...);
 int kvm_vm_plane_ioctl(KVMState *s, unsigned plane_id, unsigned long type, ...);
 
 int kvm_get_or_create_plane_fd(KVMState *s, unsigned id);
+void kvm_create_vcpu_plane(CPUState *cpu, unsigned plane, int kvm_fd);
 
 void kvm_flush_coalesced_mmio_buffer(void);
 
@@ -248,6 +251,7 @@ static inline int kvm_update_guest_debug(CPUState *cpu, unsigned long reinject_t
 
 int kvm_ioctl(KVMState *s, unsigned long type, ...);
 
+int kvm_vcpu_plane_ioctl(CPUState *cpu, unsigned plane_id, unsigned long type, ...);
 int kvm_vcpu_ioctl(CPUState *cpu, unsigned long type, ...);
 
 /**

@@ -36,6 +36,7 @@
 #include "qemu/lockcnt.h"
 #include "qemu/thread.h"
 #include "qom/object.h"
+#include "linux/kvm.h"
 
 typedef int (*WriteCoreDumpFunction)(const void *buf, size_t size,
                                      void *opaque);
@@ -539,13 +540,15 @@ struct CPUState {
     uintptr_t mem_io_pc;
 
     /* Only used in KVM */
-    int kvm_fd;
     struct KVMState *kvm_state;
     struct kvm_run *kvm_run;
     struct kvm_dirty_gfn *kvm_dirty_gfns;
     uint32_t kvm_fetch_index;
     uint64_t dirty_pages;
-    int kvm_vcpu_stats_fd;
+
+    /* KVM plane state */
+    unsigned kvm_plane;                                    /* Current active plane */
+    struct KVMPlane *kvm_plane_state[KVM_MAX_PLANES]; /* Per-Plane state */
 
     /* Use by accel-block: CPU is executing an ioctl() */
     QemuLockCnt in_ioctl_lock;
@@ -589,6 +592,16 @@ struct CPUState {
     char neg_align[-sizeof(CPUNegativeOffsetState) % 16] QEMU_ALIGNED(16);
     CPUNegativeOffsetState neg;
 };
+
+static inline struct KVMPlane *cpu_kvm_plane(CPUState *s, unsigned plane_id)
+{
+	return s->kvm_plane_state[plane_id];
+}
+
+static inline struct KVMPlane *cpu_active_kvm_plane(CPUState *s)
+{
+	return s->kvm_plane_state[s->kvm_plane];
+}
 
 /* Validate placement of CPUNegativeOffsetState. */
 QEMU_BUILD_BUG_ON(offsetof(CPUState, neg) !=
