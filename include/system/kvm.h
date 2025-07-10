@@ -218,7 +218,7 @@ int kvm_vm_ioctl(KVMState *s, unsigned long type, ...);
 int kvm_vm_plane_ioctl(KVMState *s, unsigned plane_id, unsigned long type, ...);
 
 int kvm_get_or_create_plane_fd(KVMState *s, unsigned id);
-void kvm_create_vcpu_plane(CPUState *cpu, unsigned plane, int kvm_fd);
+void kvm_create_vcpu_plane(CPUState *cpu, unsigned plane);
 
 void kvm_flush_coalesced_mmio_buffer(void);
 

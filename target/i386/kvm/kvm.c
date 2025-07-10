@@ -6527,6 +6527,60 @@ static int kvm_handle_hypercall(X86CPU *cpu, struct kvm_run *run)
     return -EINVAL;
 }
 
+static CPUState *kvm_get_cpu_by_apicid(CPUState *cpu, unsigned apic_id)
+{
+    CPU_FOREACH(cpu) {
+        X86CPU *x86_cpu = X86_CPU(cpu);
+        if (x86_cpu->apic_id == apic_id) {
+            return cpu;
+        }
+    }
+
+    return NULL;
+}
+
+static void create_plane_vcpu_cb(CPUState *cs, run_on_cpu_data data)
+{
+    int plane = data.host_int;
+
+    kvm_create_vcpu_plane(cs, plane);
+}
+
+static int kvm_handle_plane_create_vcpu(CPUState *cpu, struct kvm_run *run)
+{
+    CPUState *target_cpu = NULL;
+    int plane = -EINVAL;
+
+    plane = run->plane_event.plane;
+    if (plane < 0) {
+        return plane;
+    }
+
+    target_cpu = kvm_get_cpu_by_apicid(cpu, run->plane_event.extra[0]);
+    if (target_cpu == NULL) {
+        return -EINVAL;
+    }
+
+    bql_lock();
+    run_on_cpu(target_cpu, create_plane_vcpu_cb, RUN_ON_CPU_HOST_INT(plane));
+    bql_unlock();
+
+    return 0;
+}
+
+static int kvm_handle_plane_event(CPUState *cpu, struct kvm_run *run)
+{
+    switch (run->plane_event.cause) {
+        case KVM_PLANE_EVENT_CREATE_VCPU:
+            return kvm_handle_plane_create_vcpu(cpu, run);
+        default:
+            fprintf(stderr, "KVM: unknown plane event %d\n", run->plane_event.cause);
+            break;
+    }
+
+    return -EINVAL;
+}
+
 #define VMX_INVALID_GUEST_STATE 0x80000021
 
 int kvm_arch_handle_exit(CPUState *cs, struct kvm_run *run)
@@ -6651,6 +6705,9 @@ int kvm_arch_handle_exit(CPUState *cs, struct kvm_run *run)
             break;
         }
         ret = 0;
+	break;
+    case KVM_EXIT_PLANE_EVENT:
+        ret = kvm_handle_plane_event(cs, run);
         break;
     default:
         fprintf(stderr, "KVM: unknown exit reason %d\n", run->exit_reason);
