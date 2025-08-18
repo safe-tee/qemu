@@ -86,4 +86,11 @@ typedef struct AccelGdbConfig {
 
 bool accel_supports_guest_debug(AccelState *accel);
 
+/**
+ * accel_nr_planes:
+ *
+ * Returns the number of the highest support plane of a given MachineState.
+ */
+uint8_t accel_nr_planes(MachineState *ms);
+
 #endif /* QEMU_ACCEL_H */

@@ -38,6 +38,9 @@ struct AccelClass {
     bool (*has_memory)(AccelState *accel, AddressSpace *as,
                        hwaddr start_addr, hwaddr size);
 
+    /* planes related hooks */
+    uint8_t (*nr_planes)(AccelState *as, MachineState *ms);
+
     bool *allowed;
     /*
      * Array of global properties that would be applied when specific
