@@ -4231,6 +4231,24 @@ static bool kvm_accel_has_memory(AccelState *accel, AddressSpace *as,
     return false;
 }
 
+static uint8_t kvm_nr_planes(AccelState *accel, MachineState *ms)
+{
+    uint8_t nr_planes = 1;
+
+    // Planes are only supported with in-kernel APIC
+    if (kvm_irqchip_in_kernel()) {
+	    int ret;
+        KVMState *kvm = KVM_STATE(accel);
+
+        ret = kvm_vm_ioctl(kvm, KVM_CHECK_EXTENSION, KVM_CAP_PLANES);
+        if (ret > 0) {
+            nr_planes = ret;
+        }
+    }
+
+    return nr_planes;
+}
+
 static void kvm_get_kvm_shadow_mem(Object *obj, Visitor *v,
                                    const char *name, void *opaque,
                                    Error **errp)
@@ -4410,6 +4428,7 @@ static void kvm_accel_class_init(ObjectClass *oc, const void *data)
     ac->init_machine = kvm_init;
     ac->rebuild_guest = kvm_reset_vmfd;
     ac->has_memory = kvm_accel_has_memory;
+    ac->nr_planes = kvm_nr_planes;
     ac->allowed = &kvm_allowed;
 
     object_class_property_add(oc, "kernel-irqchip", "on|off|split",
