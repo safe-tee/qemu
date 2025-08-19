@@ -210,7 +210,11 @@ static uint64_t kvm_apic_mem_read(void *opaque, hwaddr addr,
 static void kvm_apic_mem_write(void *opaque, hwaddr addr,
                                uint64_t data, unsigned size)
 {
-    MSIMessage msg = { .address = addr, .data = data };
+    MSIMessage msg = {
+	    .address = addr,
+	    .data = data,
+	    .plane_id = qdev_default_plane(),
+    };
 
     kvm_send_msi(&msg);
 }
