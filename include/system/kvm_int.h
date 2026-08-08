@@ -109,6 +109,22 @@ struct KVMPlane {
     bool vcpu_dirty;
 };
 
+/*
+ * Per-plane VM state managed by the LVBS VM-planes hypercall handlers.
+ * The plane fd itself is owned by the accel layer (kvm_get_plane_fd);
+ * only the plane's vCPU fds and memory description live here.
+ */
+struct kvm_vm_plane_state {
+    int *vcpu_fds;
+    unsigned int *vcpu_cpu_index;
+    unsigned int vcpu_count;
+    uint64_t load_offset;
+    uint64_t memory_size;
+    uint64_t entry_point;
+    void *host_addr;        /* host pointer to plane RAM */
+    char cmdline[512];
+};
+
 struct KVMState
 {
     AccelState parent_obj;
@@ -176,6 +192,10 @@ struct KVMState
     uint16_t xen_evtchn_max_pirq;
     char *device;
     OnOffAuto honor_guest_pat;
+    /* VM planes state (populated by the LVBS hypercall handlers) */
+    struct kvm_vm_plane_state *vm_planes;
+    unsigned int vm_plane_count;
+    unsigned int vm_planes_max;
 };
 
 static inline void kvm_set_plane_fd(KVMState *s, unsigned plane, int fd)

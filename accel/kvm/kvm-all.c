@@ -822,6 +822,26 @@ void kvm_close(void)
             close(kvm_get_plane_fd(kvm_state, plane_id));
             kvm_set_plane_fd(kvm_state, plane_id, -1);
         } while (plane_id != 0);
+        if (kvm_state->vm_planes) {
+            unsigned int i, j;
+            for (i = 1; i < kvm_state->vm_plane_count; i++) {
+                struct kvm_vm_plane_state *ps = &kvm_state->vm_planes[i];
+                if (ps->vcpu_fds) {
+                    for (j = 0; j < ps->vcpu_count; j++) {
+                        if (ps->vcpu_fds[j] >= 0) {
+                            close(ps->vcpu_fds[j]);
+                        }
+                    }
+                    g_free(ps->vcpu_fds);
+                    ps->vcpu_fds = NULL;
+                }
+                g_free(ps->vcpu_cpu_index);
+                ps->vcpu_cpu_index = NULL;
+            }
+            g_free(kvm_state->vm_planes);
+            kvm_state->vm_planes = NULL;
+            kvm_state->vm_plane_count = 0;
+        }
         close(kvm_state->fd);
         kvm_state->fd = -1;
     }
