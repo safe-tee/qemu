@@ -142,6 +142,18 @@ void hv_vsm_reset(struct hv_vsm *vsm)
     memset(vsm->thunked_pages, 0, sizeof(vsm->thunked_pages));
     vsm->nr_thunked = 0;
     for (i = 0; i < vsm->nr_vps; i++) {
+        /*
+         * Disarm the kernel-side register intercepts along with the
+         * stored control word: a guest that re-enables VSM after the
+         * reboot must not run with the last boot's intercepts armed
+         * before its secure kernel asks for any, and one that does not
+         * re-enable VSM must not keep taking descriptor-table exits
+         * with no VTL to deliver them to.
+         */
+        if (vsm->ops->vcpu_arm_reg_intercepts &&
+            vsm->vp[i].cr_intercept_control) {
+            vsm->ops->vcpu_arm_reg_intercepts(vsm->vm, i, 0);
+        }
         memset(&vsm->vp[i], 0, sizeof(vsm->vp[i]));
         vsm->vp[i].enabled_vtl_set = 1; /* VTL0 */
     }
