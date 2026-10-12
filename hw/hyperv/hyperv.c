@@ -40,6 +40,7 @@ struct SynICState {
     MemoryRegion event_page_mr;
     struct hyperv_message_page *msg_page;
     struct hyperv_event_flags_page *event_page;
+    bool nomap; /* pages are plane overlays, never in system memory */
 
     QemuMutex sint_routes_mutex;
     QLIST_HEAD(, HvSintRoute) sint_routes;
@@ -123,6 +124,7 @@ void hyperv_synic_update_nomap(CPUState *cs, bool sctl_enable,
         return;
     }
 
+    synic->nomap = true;
     synic->sctl_enabled = sctl_enable;
     synic->msg_page_addr = msg_page_addr;
     synic->event_page_addr = event_page_addr;
@@ -164,7 +166,17 @@ static void synic_reset(DeviceState *dev)
     SynICState *synic = SYNIC(dev);
     memset(synic->msg_page, 0, sizeof(*synic->msg_page));
     memset(synic->event_page, 0, sizeof(*synic->event_page));
-    synic_update(synic, false, 0, 0);
+    if (synic->nomap) {
+        /*
+         * The pages were handed out as plane overlays and were never
+         * added to system memory; there is no subregion to remove.
+         */
+        synic->sctl_enabled = false;
+        synic->msg_page_addr = 0;
+        synic->event_page_addr = 0;
+    } else {
+        synic_update(synic, false, 0, 0);
+    }
     assert(QLIST_EMPTY(&synic->sint_routes));
 }
 
