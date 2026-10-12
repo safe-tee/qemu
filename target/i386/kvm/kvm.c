@@ -1659,6 +1659,15 @@ static int hyperv_fill_cpuids(CPUState *cs,
             HV_NO_NONARCH_CORESHARING;
     }
 
+    /*
+     * HvCallRestorePartitionTime (0x103) is implemented by the VSM core;
+     * a nested Hyper-V offers hibernation to its root partition only
+     * when it sees RestoreTimeOnResume.
+     */
+    if (hyperv_feat_enabled(cpu, HYPERV_FEAT_VSM)) {
+        c->eax |= HV_RESTORE_TIME_ON_RESUME;
+    }
+
     c = &cpuid_ent[cpuid_i++];
     c->function = HV_CPUID_IMPLEMENT_LIMITS;
     c->eax = cpu->hv_max_vps;

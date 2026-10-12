@@ -444,6 +444,48 @@ static int vsm_vcpu_get_msr(void *vm, int plane, uint32_t vp, uint32_t msr,
     return 0;
 }
 
+/*
+ * Partition clock restore for HvCallRestorePartitionTime.  When the
+ * kernel headers carry KVM_SET_CLOCK_GUEST (the KVM clock migration
+ * series), anchor the KVM clock to the (guest_tsc, ref_ns) pair exactly.
+ * Otherwise, or when the ioctl is unavailable or refuses (-ENODATA: no
+ * master clock; -EBUSY: TSC frequency unknown; the KVM clock is only
+ * approximate in those modes anyway), step the clock to ref_ns with
+ * plain KVM_SET_CLOCK, which costs the latency between the caller's TSC
+ * writes and this step.
+ */
+static int vsm_set_partition_clock(void *vm, uint32_t vp, uint64_t ref_ns,
+                                   uint64_t guest_tsc)
+{
+    struct kvm_clock_data data = { .clock = ref_ns };
+
+#ifdef KVM_SET_CLOCK_GUEST
+    if (kvm_check_extension(kvm_state, KVM_CAP_CLOCK_GUEST)) {
+        struct pvclock_vcpu_time_info pv;
+        int fd = vsm_vcpu_fd(vm, 0, vp);
+        int ret;
+
+        ret = vsm_vcpu_ioctl_on(vp, fd, KVM_GET_CLOCK_GUEST, &pv);
+        if (!ret) {
+            pv.tsc_timestamp = guest_tsc;
+            pv.system_time = ref_ns;
+            ret = vsm_vcpu_ioctl_on(vp, fd, KVM_SET_CLOCK_GUEST, &pv);
+        }
+        if (!ret) {
+            warn_report("hv-vsm: restored partition time exactly "
+                        "(KVM_SET_CLOCK_GUEST)");
+            return 0;
+        }
+        warn_report("hv-vsm: KVM_SET_CLOCK_GUEST failed (%d), stepping the "
+                    "clock with KVM_SET_CLOCK instead", ret);
+    }
+#endif
+
+    warn_report("hv-vsm: restored partition time approximately "
+                "(KVM_SET_CLOCK)");
+    return kvm_vm_ioctl(kvm_state, KVM_SET_CLOCK, &data);
+}
+
 static int vsm_assert_interrupt(void *vm, uint8_t vtl, uint64_t dest_mda,
                                 uint32_t vector, uint32_t type, bool logical)
 {
@@ -867,6 +909,7 @@ static const struct hv_vsm_host_ops vsm_qemu_ops = {
     .hcall_page_gpa = vsm_hcall_page_gpa,
     .set_memory_attributes = vsm_set_memory_attributes,
     .vcpu_arm_reg_intercepts = vsm_vcpu_arm_reg_intercepts,
+    .set_partition_clock = vsm_set_partition_clock,
     .log = vsm_log_op,
 };
 

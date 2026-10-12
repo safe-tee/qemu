@@ -2143,6 +2143,96 @@ void hv_vsm_set_active_vtl(struct hv_vsm *vsm, uint32_t vp, uint8_t vtl)
     }
 }
 
+/*
+ * HvCallRestorePartitionTime: a guest resuming from hibernation asks for
+ * its clocks to continue from the (TSC, reference time) pair it saved.
+ * Reference: the posted "KVM: x86: Support hibernation of a nested
+ * Hyper-V" series (kvmclock10-hmushi on git.infradead.org).  Step the TSC
+ * of every plane twin of every VP to the saved value, then hand the
+ * (TSC, reference time) pair to the embedder's partition clock op.
+ *
+ * The reference TSC pages re-arm from the stepped clock: the kernel
+ * recomputes the live plane-0 page with a fresh sequence on the clock
+ * write, and rewriting a higher plane's banked REFERENCE_TSC MSR while
+ * the page is marked changed publishes an invalid (zero) sequence, so
+ * that plane's readers fall back to the reference counter instead of
+ * the stale pre-step parameters.
+ */
+static uint64_t do_restore_partition_time(struct hv_vsm *vsm, uint32_t vp,
+                                          uint64_t control, uint64_t in_gpa)
+{
+    struct hv_vsm_restore_partition_time in;
+    uint32_t v;
+    int plane;
+
+    if (control & (HV_VSM_HYPERCALL_FAST | HV_VSM_HYPERCALL_VARHEAD_MASK |
+                   HV_VSM_HYPERCALL_REP_COMP_MASK |
+                   HV_VSM_HYPERCALL_REP_START_MASK)) {
+        return mkstatus(HV_VSM_STATUS_INVALID_HYPERCALL_INPUT, 0);
+    }
+    if (vsm->ops->guest_read(vsm->vm, in_gpa, &in, sizeof(in))) {
+        return mkstatus(HV_VSM_STATUS_INVALID_HYPERCALL_INPUT, 0);
+    }
+    if (in.reserved) {
+        return mkstatus(HV_VSM_STATUS_INVALID_HYPERCALL_INPUT, 0);
+    }
+    if (in.partition_id != HV_VSM_PARTITION_ID_SELF) {
+        return mkstatus(HV_VSM_STATUS_INVALID_PARTITION_ID, 0);
+    }
+
+    /*
+     * The TSC is a single partition clock shared across VTLs, so step
+     * every plane twin.  Identical values written back-to-back land in
+     * one KVM TSC synchronization generation; the residual skew is the
+     * per-write latency.
+     */
+    for (v = 0; v < vsm->nr_vps; v++) {
+        for (plane = 0; plane <= HV_VSM_MAX_VTL; plane++) {
+            if (!(vsm->vp[v].enabled_vtl_set & (1u << plane))) {
+                continue;
+            }
+            if (vsm->ops->vcpu_set_msr(vsm->vm, plane, v,
+                                       HV_VSM_MSR_IA32_TSC, in.tsc)) {
+                vsm_log(vsm, "RestorePartitionTime: TSC write failed, vp", v);
+                return mkstatus(HV_VSM_STATUS_INVALID_PARAMETER, 0);
+            }
+        }
+    }
+
+    if (vsm->ops->set_partition_clock(vsm->vm, vp,
+                                      in.reference_time_in_100ns * 100,
+                                      in.tsc)) {
+        vsm_log(vsm, "RestorePartitionTime: clock step failed, vp", vp);
+        return mkstatus(HV_VSM_STATUS_INVALID_PARAMETER, 0);
+    }
+
+    /*
+     * Invalidate the higher planes' banked reference TSC pages (the
+     * banked MSR is partition-wide per plane, so one rewrite from the
+     * first twin on each plane suffices).  Best effort: a plane with
+     * the page disabled keeps it disabled.
+     */
+    for (plane = 1; plane <= HV_VSM_MAX_VTL; plane++) {
+        for (v = 0; v < vsm->nr_vps; v++) {
+            uint64_t ref_tsc;
+
+            if (!(vsm->vp[v].enabled_vtl_set & (1u << plane))) {
+                continue;
+            }
+            if (!vsm->ops->vcpu_get_msr(vsm->vm, plane, v,
+                                        HV_VSM_MSR_REFERENCE_TSC,
+                                        &ref_tsc) &&
+                (ref_tsc & HV_VSM_MSR_TSC_REFERENCE_ENABLE)) {
+                vsm->ops->vcpu_set_msr(vsm->vm, plane, v,
+                                       HV_VSM_MSR_REFERENCE_TSC, ref_tsc);
+            }
+            break;
+        }
+    }
+
+    return mkstatus(HV_VSM_STATUS_SUCCESS, 0);
+}
+
 enum hv_vsm_action hv_vsm_handle_hcall(struct hv_vsm *vsm, uint32_t vp,
                                        uint64_t control, uint64_t in_gpa,
                                        uint64_t out_gpa,
@@ -2460,6 +2550,10 @@ enum hv_vsm_action hv_vsm_handle_hcall(struct hv_vsm *vsm, uint32_t vp,
 
     case HV_VSM_CALL_START_VP:
         res->result = do_start_vp(vsm, vp, control, in_gpa, fast);
+        return HV_VSM_COMPLETE;
+
+    case HV_VSM_CALL_RESTORE_PARTITION_TIME:
+        res->result = do_restore_partition_time(vsm, vp, control, in_gpa);
         return HV_VSM_COMPLETE;
 
     default:

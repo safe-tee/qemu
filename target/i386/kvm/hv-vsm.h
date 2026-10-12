@@ -65,6 +65,9 @@
 #define HV_VSM_CALL_SET_VP_REGISTERS            0x0051
 #define HV_VSM_CALL_TRANSLATE_VIRTUAL_ADDRESS   0x0052
 #define HV_VSM_CALL_GET_VP_INDEX_FROM_APIC_ID   0x009a
+/* 0x103 is reserved in the TLFS; defined in Microsoft's hvdef and in
+ * mainline hvgdk_mini.h via the posted nested-Hyper-V hibernation series. */
+#define HV_VSM_CALL_RESTORE_PARTITION_TIME      0x0103
 
 #define HV_VSM_PARTITION_ID_SELF        ((uint64_t)-1)
 
@@ -140,6 +143,9 @@
 /* The MSRs backing the 0x9xxxx registers */
 #define HV_VSM_MSR_GUEST_OS_ID          0x40000000
 #define HV_VSM_MSR_HYPERCALL            0x40000001
+#define HV_VSM_MSR_REFERENCE_TSC        0x40000021
+#define HV_VSM_MSR_IA32_TSC             0x00000010
+#define HV_VSM_MSR_TSC_REFERENCE_ENABLE 0x1
 
 /* X64 control register ids (TLFS HvX64RegisterCr0..Cr8) */
 #define HV_VSM_X64_REG_CR0              0x00040000
@@ -327,6 +333,16 @@ struct hv_vsm_enable_vp_vtl {
     struct hv_vsm_init_vp_context vp_context;
 } __hv_vsm_packed;
 
+/* HvCallRestorePartitionTime input; layout from Microsoft's hvdef (in
+ * mainline hvgdk_mini.h via the nested-Hyper-V hibernation series). */
+struct hv_vsm_restore_partition_time {
+    uint64_t partition_id;
+    uint32_t tsc_sequence;
+    uint32_t reserved;
+    uint64_t reference_time_in_100ns;
+    uint64_t tsc;
+} __hv_vsm_packed;
+
 struct hv_vsm_get_vp_registers_input {
     uint64_t partition_id;
     uint32_t vp_index;
@@ -443,6 +459,18 @@ struct hv_vsm_host_ops {
                                  uint64_t size, uint64_t attrs);
     /* Arm lower-VTL register intercepts (HvRegisterCrInterceptControl). */
     int (*vcpu_arm_reg_intercepts)(void *vm, uint32_t vp, uint64_t control);
+
+    /*
+     * Make the partition-wide clock backing the Hyper-V reference time
+     * read ref_ns (nanoseconds) at the moment the guest TSC reads
+     * guest_tsc; vp is the calling processor, whose TSC has already been
+     * stepped to guest_tsc.  An exact implementation anchors the clock to
+     * the (guest_tsc, ref_ns) pair; stepping the clock to ref_ns "now" is
+     * an acceptable approximation, costing the latency between the TSC
+     * writes and the step.
+     */
+    int (*set_partition_clock)(void *vm, uint32_t vp, uint64_t ref_ns,
+                               uint64_t guest_tsc);
 
     /* Diagnostics for unimplemented guest requests; may be NULL. */
     void (*log)(void *vm, const char *msg);
