@@ -107,6 +107,18 @@ static int resolve_vp(struct hv_vsm *vsm, uint32_t caller, uint32_t vp_index,
     return 0;
 }
 
+/*
+ * HV_INPUT_VTL names a target VTL when use_target_vtl is set; the Windows
+ * secure kernel's first VSM register reads send 0xff (use_target_vtl plus
+ * every reserved bit and target_vtl 15), which means the caller's own VTL.
+ * Any other reserved-bit pattern keeps failing the per-call target checks
+ * (0x1f names VTL 15 and stays refused).
+ */
+static bool input_vtl_targets(union hv_vsm_input_vtl in_vtl)
+{
+    return in_vtl.use_target_vtl && in_vtl.as_uint8 != 0xff;
+}
+
 void hv_vsm_reset(struct hv_vsm *vsm)
 {
     uint32_t i;
@@ -786,7 +798,7 @@ static uint64_t do_translate_virtual_address(struct hv_vsm *vsm,
     vp = caller;
     flags = in.control_flags & HV_VSM_XLATE_GVA_FLAGS_MASK;
     input_vtl.as_uint8 = in.control_flags >> 56;
-    target_vtl = input_vtl.use_target_vtl ? input_vtl.target_vtl :
+    target_vtl = input_vtl_targets(input_vtl) ? input_vtl.target_vtl :
                  vsm->vp[caller].active_vtl;
     if (target_vtl > HV_VSM_MAX_VTL ||
         target_vtl > vsm->vp[caller].active_vtl ||
@@ -968,7 +980,7 @@ static uint64_t do_modify_vtl_protection_mask(struct hv_vsm *vsm,
      * the caller's; without an explicit target it is the next enabled VTL
      * below the caller, so VTL0 callers have nothing to target.
      */
-    if (in.input_vtl.use_target_vtl) {
+    if (input_vtl_targets(in.input_vtl)) {
         target_vtl = in.input_vtl.target_vtl;
         if (target_vtl >= vsm->vp[caller].active_vtl) {
             return mkstatus(HV_VSM_STATUS_ACCESS_DENIED, 0);
@@ -1701,7 +1713,7 @@ static uint64_t do_get_vp_registers(struct hv_vsm *vsm, uint32_t caller,
     if (resolve_vp(vsm, caller, hdr.vp_index, &vp)) {
         return mkstatus(HV_VSM_STATUS_INVALID_VP_INDEX, 0);
     }
-    target_vtl = hdr.input_vtl.use_target_vtl ? hdr.input_vtl.target_vtl :
+    target_vtl = input_vtl_targets(hdr.input_vtl) ? hdr.input_vtl.target_vtl :
                  vsm->vp[caller].active_vtl;
     if (target_vtl > HV_VSM_MAX_VTL) {
         return mkstatus(HV_VSM_STATUS_INVALID_PARAMETER, 0);
@@ -1780,7 +1792,7 @@ static uint64_t do_set_vp_registers(struct hv_vsm *vsm, uint32_t caller,
     if (resolve_vp(vsm, caller, hdr.vp_index, &vp)) {
         return mkstatus(HV_VSM_STATUS_INVALID_VP_INDEX, 0);
     }
-    target_vtl = hdr.input_vtl.use_target_vtl ? hdr.input_vtl.target_vtl :
+    target_vtl = input_vtl_targets(hdr.input_vtl) ? hdr.input_vtl.target_vtl :
                  vsm->vp[caller].active_vtl;
     if (target_vtl > HV_VSM_MAX_VTL) {
         return mkstatus(HV_VSM_STATUS_INVALID_PARAMETER, 0);
