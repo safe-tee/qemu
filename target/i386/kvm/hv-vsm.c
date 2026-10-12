@@ -284,6 +284,13 @@ static void load_segment(const struct hv_vsm_x64_segment_register *hv,
  * CR4.PCIDE is forced on: traces of real Hyper-V show the VTL1 context
  * starts with PCIDE set regardless of the caller-provided value, and
  * Windows (WS2025 resume) depends on it.
+ *
+ * HV_INITIAL_VP_CONTEXT cannot express the general-purpose registers, CR2
+ * or the debug registers, so no guest can depend on their value here:
+ * clear them to reset values rather than hand a VP the firmware already
+ * ran its leftovers at the context's first instruction.  The LAPIC, the
+ * SynIC and the FPU/vector state are not named by the hypercall either
+ * and are deliberately left as they are.
  */
 static int apply_vp_context(struct hv_vsm *vsm, int plane, uint32_t vp,
                             const struct hv_vsm_init_vp_context *ctx)
@@ -312,6 +319,7 @@ static int apply_vp_context(struct hv_vsm *vsm, int plane, uint32_t vp,
     sregs.idt.base = ctx->idtr.base;
     sregs.idt.limit = ctx->idtr.limit;
     sregs.cr0 = ctx->cr0;
+    sregs.cr2 = 0;
     sregs.cr3 = ctx->cr3;
     sregs.cr4 = ctx->cr4 | HV_VSM_X86_CR4_PCIDE;
     sregs.efer = ctx->efer;
@@ -336,11 +344,8 @@ static int apply_vp_context(struct hv_vsm *vsm, int plane, uint32_t vp,
         return ret;
     }
 
-    ret = ops->vcpu_get_regs(vsm->vm, plane, vp, &regs);
-    if (ret) {
-        fprintf(stderr, "hv-vsm dbg: APPLYCTX get_regs plane=%d vp=%u ret=%d\n", plane, vp, ret);
-        return ret;
-    }
+    /* struct kvm_regs is the GPRs plus RIP/RFLAGS: zero clears the GPRs. */
+    memset(&regs, 0, sizeof(regs));
     regs.rip = ctx->rip;
     regs.rsp = ctx->rsp;
     regs.rflags = ctx->rflags | HV_VSM_X86_EFLAGS_FIXED;
@@ -348,6 +353,20 @@ static int apply_vp_context(struct hv_vsm *vsm, int plane, uint32_t vp,
     if (ret) {
         fprintf(stderr, "hv-vsm dbg: APPLYCTX set_regs plane=%d vp=%u ret=%d\n", plane, vp, ret);
         return ret;
+    }
+
+    if (ops->vcpu_set_debugregs) {
+        struct kvm_debugregs dbg = {
+            .dr6 = 0xffff0ff0,      /* architectural reset values */
+            .dr7 = 0x400,
+        };
+
+        ret = ops->vcpu_set_debugregs(vsm->vm, plane, vp, &dbg);
+        if (ret) {
+            fprintf(stderr, "hv-vsm dbg: APPLYCTX set_debugregs plane=%d vp=%u ret=%d\n",
+                    plane, vp, ret);
+            return ret;
+        }
     }
 
     ret = ops->vcpu_set_msr(vsm->vm, plane, vp, HV_VSM_MSR_PAT,
