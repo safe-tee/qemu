@@ -37,6 +37,21 @@ static bool vsm_dbg(void)
 
 
 typedef struct HvVsmGlue {
+    /*
+     * Serializes every entry into the VSM core (hv_vsm_*()) and the
+     * glue-owned state the core reads through its ops callbacks
+     * (vsm_simp_ovl[]).  The core keeps shared per-partition state
+     * (protection arrays, per-VP VTL state) with no locking of its
+     * own, so each entry point takes this lock around the core call.
+     *
+     * Lock ordering: the BQL, where held (machine reset, vCPU init),
+     * is taken before this lock.  Nothing that runs under this lock
+     * may call bql_lock(); the vsm_qemu_ops callbacks are all BQL-free
+     * (vcpu/vm ioctls routed through run_on_cpu dispatch, RAM access
+     * via address_space RCU).  A vCPU thread acquires the lock with
+     * vsm_glue_lock_from_vcpu(), never qemu_mutex_lock(), so that it
+     * keeps servicing work the lock holder may have dispatched to it.
+     */
     QemuMutex lock;
     struct hv_vsm *core;
     uint32_t nr_vps;
@@ -46,6 +61,8 @@ typedef struct HvVsmGlue {
 static HvVsmGlue vsm_glue;
 static bool vsm_inkernel_switch;
 static uint32_t vsm_trace_vp = (uint32_t)-1;
+
+static void vsm_glue_init_once(void);
 
 /*
  * Plane vCPU state ioctls take the vCPU mutex, which the vCPU's own thread
@@ -70,7 +87,8 @@ typedef struct VsmVcpuIoctl {
  */
 static void vsm_glue_lock_from_vcpu(CPUState *cs)
 {
-    while (!qemu_mutex_trylock(&vsm_glue.lock)) {
+    /* qemu_mutex_trylock() returns 0 when it takes the lock. */
+    while (qemu_mutex_trylock(&vsm_glue.lock)) {
         if (cs) {
             process_queued_cpu_work(cs);
         }
@@ -559,8 +577,8 @@ static void *vsm_overlay_ptr(void *vm, int plane, uint64_t gfn)
  * device keeps writing messages there, and the overlay makes the plane
  * read the same memory.  Twins get a locally allocated buffer.
  */
-int kvm_hv_vsm_set_synic_overlay(X86CPU *cpu, uint32_t plane, int kind,
-                                 uint64_t page_reg, void *ext_buf)
+static int vsm_set_synic_overlay_locked(X86CPU *cpu, uint32_t plane, int kind,
+                                        uint64_t page_reg, void *ext_buf)
 {
     uint32_t vp = hyperv_vp_index(CPU(cpu));
     struct vsm_simp_overlay *o;
@@ -606,6 +624,24 @@ int kvm_hv_vsm_set_synic_overlay(X86CPU *cpu, uint32_t plane, int kind,
         o->gfn_plus_1 = 0;
     }
     return 0;
+}
+
+/*
+ * SynIC exits arrive on vCPU threads without the BQL; take the glue
+ * lock so overlay installation serializes against the core reading
+ * vsm_simp_ovl[] through ops->overlay_ptr on other vCPUs.
+ */
+int kvm_hv_vsm_set_synic_overlay(X86CPU *cpu, uint32_t plane, int kind,
+                                 uint64_t page_reg, void *ext_buf)
+{
+    int ret;
+
+    vsm_glue_init_once();
+
+    vsm_glue_lock_from_vcpu(CPU(cpu));
+    ret = vsm_set_synic_overlay_locked(cpu, plane, kind, page_reg, ext_buf);
+    qemu_mutex_unlock(&vsm_glue.lock);
+    return ret;
 }
 
 int kvm_hv_vsm_handle_synic_exit(X86CPU *cpu, uint32_t plane,
@@ -1278,10 +1314,6 @@ bool kvm_hv_vsm_handle_hcall(X86CPU *cpu, struct kvm_hyperv_exit *exit)
 
     vsm_glue_init_once();
 
-    if (vsm_inkernel_switch) {
-        hv_vsm_set_active_vtl(vsm_glue.core, vp, exit->plane);
-    }
-
     {
         uint16_t dbgcode = exit->u.hcall.input & 0xffff;
 
@@ -1428,6 +1460,9 @@ bool kvm_hv_vsm_handle_hcall(X86CPU *cpu, struct kvm_hyperv_exit *exit)
         }
     }
     vsm_glue_lock_from_vcpu(CPU(cpu));
+    if (vsm_inkernel_switch) {
+        hv_vsm_set_active_vtl(vsm_glue.core, vp, exit->plane);
+    }
     action = hv_vsm_handle_hcall(vsm_glue.core, vp, exit->u.hcall.input,
                                  exit->u.hcall.params[0],
                                  exit->u.hcall.params[1], &res);
