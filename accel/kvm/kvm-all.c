@@ -3711,6 +3711,12 @@ int kvm_cpu_exec(CPUState *cpu)
             trace_kvm_memory_fault(run->memory_fault.gpa,
                                    run->memory_fault.size,
                                    run->memory_fault.flags);
+            if (run->memory_fault.flags & (KVM_MEMORY_EXIT_FLAG_READ |
+                                           KVM_MEMORY_EXIT_FLAG_WRITE |
+                                           KVM_MEMORY_EXIT_FLAG_EXEC)) {
+                ret = kvm_arch_handle_exit(cpu, run);
+                break;
+            }
             if (run->memory_fault.flags & ~KVM_MEMORY_EXIT_FLAG_PRIVATE) {
                 error_report("KVM_EXIT_MEMORY_FAULT: Unknown flag 0x%" PRIx64,
                              (uint64_t)run->memory_fault.flags);

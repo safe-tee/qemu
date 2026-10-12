@@ -1,6 +1,8 @@
 i386_kvm_ss = ss.source_set()
 
 i386_kvm_ss.add(files(
+  'hv-vsm.c',
+  'hv-vsm-qemu.c',
   'kvm.c',
   'kvm-cpu.c',
   'vmsr_energy.c',

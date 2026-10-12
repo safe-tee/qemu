@@ -553,6 +553,8 @@ typedef struct NvmeCQueue {
         OBJECT_CHECK(NvmeCtrl, (obj), TYPE_NVME)
 
 typedef struct NvmeParams {
+    uint16_t vid;
+    uint16_t did;
     char     *serial;
     char     *model;
     char     *firmware_version;

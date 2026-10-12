@@ -10774,6 +10774,8 @@ static const Property x86_cpu_properties[] = {
     DEFINE_PROP_BIT64("hv-syndbg", X86CPU, hyperv_features,
                       HYPERV_FEAT_SYNDBG, 0),
 #endif
+    DEFINE_PROP_BIT64("hv-vsm", X86CPU, hyperv_features,
+                      HYPERV_FEAT_VSM, 0),
     DEFINE_PROP_BOOL("hv-passthrough", X86CPU, hyperv_passthrough, false),
     DEFINE_PROP_BOOL("hv-enforce-cpuid", X86CPU, hyperv_enforce_cpuid, false),
 

@@ -44,6 +44,10 @@
 /*
  * HV_CPUID_FEATURES.EBX bits
  */
+#define HV_ACCESS_VSM                     (1u << 16)
+#define HV_ACCESS_VP_REGISTERS            (1u << 17)
+#define HV_ENABLE_EXTENDED_HYPERCALLS     (1u << 20)
+#define HV_START_VIRTUAL_PROCESSOR        (1u << 21)
 #define HV_POST_MESSAGES             (1u << 4)
 #define HV_SIGNAL_EVENTS             (1u << 5)
 
@@ -55,6 +59,7 @@
 #define HV_PERF_MONITOR_AVAILABLE               (1u << 2)
 #define HV_CPU_DYNAMIC_PARTITIONING_AVAILABLE   (1u << 3)
 #define HV_HYPERCALL_XMM_INPUT_AVAILABLE        (1u << 4)
+#define HV_HYPERCALL_XMM_OUTPUT_AVAILABLE       (1u << 15)
 #define HV_GUEST_IDLE_STATE_AVAILABLE           (1u << 5)
 #define HV_FREQUENCY_MSRS_AVAILABLE             (1u << 8)
 #define HV_GUEST_CRASH_MSR_AVAILABLE            (1u << 10)

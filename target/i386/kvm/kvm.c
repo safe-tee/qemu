@@ -1100,6 +1100,21 @@ static struct {
              .bits = HV_DEPRECATING_AEOI_RECOMMENDED}
         }
     },
+    [HYPERV_FEAT_VSM] = {
+        .desc = "Virtual Secure Mode, VSM (hv-vsm)",
+        .flags = {
+            {.func = HV_CPUID_FEATURES, .reg = R_EBX,
+             .bits = HV_ACCESS_VSM | HV_ACCESS_VP_REGISTERS |
+                     HV_ENABLE_EXTENDED_HYPERCALLS |
+                     HV_START_VIRTUAL_PROCESSOR},
+            {.func = HV_CPUID_FEATURES, .reg = R_EDX,
+             .bits = HV_HYPERCALL_XMM_INPUT_AVAILABLE |
+                     HV_HYPERCALL_XMM_OUTPUT_AVAILABLE}
+        },
+        .dependencies = BIT(HYPERV_FEAT_VPINDEX) |
+                        BIT(HYPERV_FEAT_TLBFLUSH_EXT),
+        .skip_passthrough = true,
+    },
     [HYPERV_FEAT_SYNDBG] = {
         .desc = "Enable synthetic kernel debugger channel (hv-syndbg)",
         .flags = {
@@ -1358,6 +1373,16 @@ static bool hyperv_feature_supported(CPUState *cs, int feature)
     int i, reg;
 
     /*
+     * VSM is emulated entirely in userspace on top of hypercall
+     * forwarding, so the kernel never reports its CPUID bits; the VM
+     * capabilities are probed at VM init instead.
+     */
+    if (feature == HYPERV_FEAT_VSM) {
+        return kvm_check_extension(kvm_state, KVM_CAP_PLANES) &&
+               kvm_check_extension(kvm_state, KVM_CAP_HYPERV_FORWARD_HCALL);
+    }
+
+    /*
      * kvm_hyperv_properties needs to define at least one CPUID flag which
      * must be used to detect the feature, it's hard to say whether it is
      * supported or not otherwise.
@@ -1613,7 +1638,9 @@ static int hyperv_fill_cpuids(CPUState *cs,
 
 
     /* Not exposed by KVM but needed to make CPU hotplug in Windows work */
-    c->edx |= HV_CPU_DYNAMIC_PARTITIONING_AVAILABLE;
+    if (!hyperv_feat_enabled(cpu, HYPERV_FEAT_VSM)) {
+        c->edx |= HV_CPU_DYNAMIC_PARTITIONING_AVAILABLE;
+    }
 
     c = &cpuid_ent[cpuid_i++];
     c->function = HV_CPUID_ENLIGHTMENT_INFO;
@@ -1705,6 +1732,10 @@ static int hyperv_init_vcpu(X86CPU *cpu)
     CPUState *cs = CPU(cpu);
     Error *local_err = NULL;
     int ret;
+
+    if (hyperv_feat_enabled(cpu, HYPERV_FEAT_VSM)) {
+        kvm_hv_vsm_vcpu_init(cpu);
+    }
 
     if (cpu->hyperv_passthrough && hv_passthrough_mig_blocker == NULL) {
         error_setg(&hv_passthrough_mig_blocker,
@@ -2065,6 +2096,14 @@ int kvm_arch_pre_create_vcpu(CPUState *cpu, Error **errp)
 
     if (first) {
         first = false;
+
+        if (hyperv_feat_enabled(X86_CPU(cpu), HYPERV_FEAT_VSM)) {
+            ret = kvm_hv_vsm_vm_init(kvm_state);
+            if (ret < 0) {
+                error_setg(errp, "hv-vsm initialization failed");
+                return ret;
+            }
+        }
 
         /*
          * Since Linux v5.18, KVM provides a VM-level capability to easily
@@ -2504,6 +2543,12 @@ int kvm_arch_init_vcpu(CPUState *cs)
     r = kvm_vcpu_ioctl(cs, KVM_SET_CPUID2, &cpuid_data);
     if (r) {
         goto fail;
+    }
+    if (hyperv_feat_enabled(cpu, HYPERV_FEAT_VSM)) {
+        r = kvm_hv_vsm_vcpu_set_cpuid(cpu, &cpuid_data.cpuid);
+        if (r) {
+            goto fail;
+        }
     }
     kvm_init_xsave(env);
 
@@ -7163,6 +7208,10 @@ int kvm_arch_handle_exit(CPUState *cs, struct kvm_run *run)
         ret = -1;
         break;
     case KVM_EXIT_DEBUG:
+        if (kvm_hv_vsm_trace_step(cpu, run->debug.arch.pc)) {
+            ret = 0;
+            break;
+        }
         DPRINTF("kvm_exit_debug\n");
         bql_lock();
         ret = kvm_handle_debug(cpu, &run->debug.arch);
@@ -7170,6 +7219,9 @@ int kvm_arch_handle_exit(CPUState *cs, struct kvm_run *run)
         break;
     case KVM_EXIT_HYPERV:
         ret = kvm_hv_handle_exit(cpu, &run->hyperv);
+        break;
+    case KVM_EXIT_MEMORY_FAULT:
+        ret = kvm_hv_vsm_handle_memory_fault(cpu, run);
         break;
     case KVM_EXIT_IOAPIC_EOI:
         ioapic_eoi_broadcast(run->eoi.vector);

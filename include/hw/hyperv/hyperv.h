@@ -80,6 +80,9 @@ void hyperv_synic_add(CPUState *cs);
 void hyperv_synic_reset(CPUState *cs);
 void hyperv_synic_update(CPUState *cs, bool enable,
                          hwaddr msg_page_addr, hwaddr event_page_addr);
+void hyperv_synic_update_nomap(CPUState *cs, bool enable,
+                               hwaddr msg_page_addr, hwaddr event_page_addr,
+                               void **msg_ptr, void **event_ptr);
 bool hyperv_is_synic_enabled(void);
 bool hyperv_is_synic_present(CPUState *cs);
 

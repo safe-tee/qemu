@@ -106,6 +106,34 @@ void hyperv_synic_update(CPUState *cs, bool sctl_enable,
     synic_update(synic, sctl_enable, msg_page_addr, event_page_addr);
 }
 
+/*
+ * VSM variant: track the page addresses and hand out the backing
+ * buffers without mapping them into system memory.  With per-VTL
+ * overlay pages a global mapping would leak this VTL's SynIC pages
+ * into every other VTL's view of those GPAs; the caller instead maps
+ * the buffers for this plane only.
+ */
+void hyperv_synic_update_nomap(CPUState *cs, bool sctl_enable,
+                               hwaddr msg_page_addr, hwaddr event_page_addr,
+                               void **msg_ptr, void **event_ptr)
+{
+    SynICState *synic = get_synic(cs);
+
+    if (!synic) {
+        return;
+    }
+
+    synic->sctl_enabled = sctl_enable;
+    synic->msg_page_addr = msg_page_addr;
+    synic->event_page_addr = event_page_addr;
+    if (msg_ptr) {
+        *msg_ptr = synic->msg_page;
+    }
+    if (event_ptr) {
+        *event_ptr = synic->event_page;
+    }
+}
+
 static void synic_realize(DeviceState *dev, Error **errp)
 {
     Object *obj = OBJECT(dev);

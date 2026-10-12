@@ -70,6 +70,62 @@ int kvm_hv_handle_exit(X86CPU *cpu, struct kvm_hyperv_exit *exit)
             return -1;
         }
 
+        /*
+         * With VSM, each plane's SIMP is a per-plane overlay; the SynIC
+         * device's global MemoryRegion overlay would leak one plane's
+         * message page into every other plane's view of that GPA.
+         */
+        if (hyperv_feat_enabled(cpu, HYPERV_FEAT_VSM)) {
+            if (exit->plane != 0) {
+                if (exit->u.synic.msr == HV_X64_MSR_SIMP &&
+                    kvm_hv_vsm_handle_synic_exit(cpu, exit->plane,
+                                                 exit->u.synic.msg_page) < 0) {
+                    return -1;
+                }
+                return EXCP_INTERRUPT;
+            }
+
+            switch (exit->u.synic.msr) {
+            case HV_X64_MSR_SCONTROL:
+                env->msr_hv_synic_control = exit->u.synic.control;
+                break;
+            case HV_X64_MSR_SIMP:
+                env->msr_hv_synic_msg_page = exit->u.synic.msg_page;
+                break;
+            case HV_X64_MSR_SIEFP:
+                env->msr_hv_synic_evt_page = exit->u.synic.evt_page;
+                break;
+            default:
+                return -1;
+            }
+
+            /*
+             * Keep the SynIC device's state (so in-QEMU message and
+             * event delivery works) but do not map its pages globally:
+             * back this plane's view with the device buffers instead.
+             */
+            {
+                void *msg_ptr = NULL, *evt_ptr = NULL;
+                uint64_t simp = env->msr_hv_synic_msg_page;
+                uint64_t siefp = env->msr_hv_synic_evt_page;
+
+                hyperv_synic_update_nomap(CPU(cpu),
+                        env->msr_hv_synic_control & HV_SYNIC_ENABLE,
+                        (simp & HV_SIMP_ENABLE) ?
+                            (simp & TARGET_PAGE_MASK) : 0,
+                        (siefp & HV_SIEFP_ENABLE) ?
+                            (siefp & TARGET_PAGE_MASK) : 0,
+                        &msg_ptr, &evt_ptr);
+                if (kvm_hv_vsm_set_synic_overlay(cpu, 0, 0, simp,
+                                                 msg_ptr) < 0 ||
+                    kvm_hv_vsm_set_synic_overlay(cpu, 0, 1, siefp,
+                                                 evt_ptr) < 0) {
+                    return -1;
+                }
+            }
+            return EXCP_INTERRUPT;
+        }
+
         switch (exit->u.synic.msr) {
         case HV_X64_MSR_SCONTROL:
             env->msr_hv_synic_control = exit->u.synic.control;
@@ -118,10 +174,26 @@ int kvm_hv_handle_exit(X86CPU *cpu, struct kvm_hyperv_exit *exit)
                 hyperv_hcall_reset_dbg_session(out_param);
             break;
         default:
+            if (hyperv_feat_enabled(cpu, HYPERV_FEAT_VSM) &&
+                kvm_hv_vsm_handle_hcall(cpu, exit)) {
+                break;
+            }
             exit->u.hcall.result = HV_STATUS_INVALID_HYPERCALL_CODE;
         }
         return 0;
     }
+
+    case KVM_EXIT_HYPERV_VTL_INTERRUPT:
+        if (!hyperv_feat_enabled(cpu, HYPERV_FEAT_VSM)) {
+            return -1;
+        }
+        return kvm_hv_vsm_handle_vtl_interrupt(cpu, exit->plane);
+
+    case KVM_EXIT_HYPERV_REG_INTERCEPT:
+        if (!hyperv_feat_enabled(cpu, HYPERV_FEAT_VSM)) {
+            return -1;
+        }
+        return kvm_hv_vsm_handle_reg_intercept(cpu, exit);
 
     case KVM_EXIT_HYPERV_SYNDBG:
         if (!hyperv_feat_enabled(cpu, HYPERV_FEAT_SYNDBG)) {

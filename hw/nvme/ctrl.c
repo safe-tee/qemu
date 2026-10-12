@@ -9125,9 +9125,21 @@ static bool nvme_init_pci(NvmeCtrl *n, PCIDevice *pci_dev, Error **errp)
     if (n->params.use_intel_id) {
         pci_config_set_vendor_id(pci_conf, PCI_VENDOR_ID_INTEL);
         pci_config_set_device_id(pci_conf, PCI_DEVICE_ID_INTEL_NVME);
+        if (n->params.vid) {
+            pci_config_set_vendor_id(pci_conf, n->params.vid);
+        }
+        if (n->params.did) {
+            pci_config_set_device_id(pci_conf, n->params.did);
+        }
     } else {
         pci_config_set_vendor_id(pci_conf, PCI_VENDOR_ID_REDHAT);
         pci_config_set_device_id(pci_conf, PCI_DEVICE_ID_REDHAT_NVME);
+        if (n->params.vid) {
+            pci_config_set_vendor_id(pci_conf, n->params.vid);
+        }
+        if (n->params.did) {
+            pci_config_set_device_id(pci_conf, n->params.did);
+        }
     }
 
     pci_config_set_class(pci_conf, PCI_CLASS_STORAGE_EXPRESS);
@@ -9752,6 +9764,8 @@ static const Property nvme_props[] = {
     DEFINE_PROP_UINT32("cmb_size_mb", NvmeCtrl, params.cmb_size_mb, 0),
     DEFINE_PROP_UINT32("num_queues", NvmeCtrl, params.num_queues, 0),
     DEFINE_PROP_UINT32("max_ioqpairs", NvmeCtrl, params.max_ioqpairs, 64),
+    DEFINE_PROP_UINT16("vid", NvmeCtrl, params.vid, 0),
+    DEFINE_PROP_UINT16("did", NvmeCtrl, params.did, 0),
     DEFINE_PROP_UINT16("msix_qsize", NvmeCtrl, params.msix_qsize, 65),
     DEFINE_PROP_UINT8("aerl", NvmeCtrl, params.aerl, 3),
     DEFINE_PROP_UINT32("aer_max_queued", NvmeCtrl, params.aer_max_queued, 64),

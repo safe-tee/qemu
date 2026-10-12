@@ -96,8 +96,10 @@ struct kvm_hyperv_exit {
 #define KVM_EXIT_HYPERV_SYNIC          1
 #define KVM_EXIT_HYPERV_HCALL          2
 #define KVM_EXIT_HYPERV_SYNDBG         3
+#define KVM_EXIT_HYPERV_VTL_INTERRUPT  4
+#define KVM_EXIT_HYPERV_REG_INTERCEPT  5
 	__u32 type;
-	__u32 pad1;
+	__u32 plane;
 	union {
 		struct {
 			__u32 msr;
@@ -111,6 +113,15 @@ struct kvm_hyperv_exit {
 			__u64 result;
 			__u64 params[2];
 		} hcall;
+		struct {
+			__u32 reg;
+			__u8 insn_len;
+			__u8 pad[3];
+			__u64 base;
+			__u32 limit;
+			__u32 pad2;
+			__u64 rip;
+		} reg_intercept;
 		struct {
 			__u32 msr;
 			__u32 pad2;
@@ -454,10 +465,34 @@ struct kvm_run {
 		} notify;
 		/* KVM_EXIT_MEMORY_FAULT */
 		struct {
+#define KVM_MEMORY_EXIT_FLAG_READ       (1ULL << 0)
+#define KVM_MEMORY_EXIT_FLAG_WRITE      (1ULL << 1)
+#define KVM_MEMORY_EXIT_FLAG_EXEC       (1ULL << 2)
 #define KVM_MEMORY_EXIT_FLAG_PRIVATE	(1ULL << 3)
+#define KVM_MEMORY_EXIT_FLAG_GVA_VALID	(1ULL << 4)
+/* The fault was caused by the vCPU's plane's memory protections. */
+#define KVM_MEMORY_EXIT_FLAG_PLANE_PROT	(1ULL << 5)
+/*
+ * insn_len/insn_bytes are valid.  For an EXEC fault the faulting
+ * instruction itself cannot be read: insn_bytes stays zero, and
+ * insn_len is the length of the instruction which performed the
+ * fetch (reported by VMX hardware; not available on SVM).
+ */
+#define KVM_MEMORY_EXIT_FLAG_INSN_VALID	(1ULL << 6)
 			__u64 flags;
 			__u64 gpa;
 			__u64 size;
+			/*
+			 * gva/insn_len/insn_bytes are set on plane-protection
+			 * faults when available, and are zero on every other
+			 * memory-fault exit.  They are enumerated, along with
+			 * the PLANE_PROT and INSN_VALID flags, by the plane
+			 * memory overlay capability.
+			 */
+			__u64 gva;
+			__u32 insn_len;
+			__u8  insn_bytes[16];
+			__u32 pad;
 		} memory_fault;
 		/* KVM_EXIT_TDX */
 		struct {
@@ -1001,7 +1036,25 @@ struct kvm_enable_cap {
 #define KVM_CAP_S390_KEYOP 247
 #define KVM_CAP_S390_VSIE_ESAMODE 248
 #define KVM_CAP_S390_HPAGE_2G 249
+#define KVM_CAP_PPC_COMPAT_CAPS 250
+#define KVM_CAP_ARM_PMU_V3_STRICT 251
+#define KVM_CAP_GUEST_MEMFD_MEMORY_ATTRIBUTES 252
 #define KVM_CAP_PLANES 253
+#define KVM_CAP_HYPERV_FORWARD_HCALL 254
+#define KVM_CAP_HCALL_FAULT_EXIT 255
+
+/*
+ * Userspace completion of a forwarded Hyper-V hypercall (KVM_EXIT_HYPERV_HCALL
+ * under KVM_CAP_HYPERV_FORWARD_HCALL): setting this bit in the result makes
+ * KVM raise #UD at the faulting instruction instead of completing the
+ * hypercall; all other result bits are then ignored.  Only honoured while
+ * forwarding is enabled, and only on kernels where
+ * KVM_CHECK_EXTENSION(KVM_CAP_HYPERV_FORWARD_HCALL) returns >= 2.
+ */
+#define KVM_HV_HCALL_RESULT_RAISE_UD	(1ULL << 63)
+#define KVM_CAP_HYPERV_VTL_SWITCH 256
+#define KVM_CAP_HYPERV_REG_INTERCEPT 257
+#define KVM_CAP_PLANE_MEMORY_OVERLAYS 258
 
 struct kvm_irq_routing_irqchip {
 	__u32 irqchip;
@@ -1346,6 +1399,8 @@ struct kvm_s390_keyop {
 /* Available with KVM_CAP_COUNTER_OFFSET */
 #define KVM_ARM_SET_COUNTER_OFFSET _IOW(KVMIO,  0xb5, struct kvm_arm_counter_offset)
 #define KVM_ARM_GET_REG_WRITABLE_MASKS _IOR(KVMIO,  0xb6, struct reg_mask_range)
+/* Available with KVM_CAP_PPC_COMPAT_CAPS */
+#define KVM_PPC_GET_COMPAT_CAPS	_IO(KVMIO,  0xb8)
 
 /* ioctl for vm fd */
 #define KVM_CREATE_DEVICE	  _IOWR(KVMIO,  0xe0, struct kvm_create_device)
@@ -1356,6 +1411,21 @@ struct kvm_s390_keyop {
 #define KVM_HAS_DEVICE_ATTR	  _IOW(KVMIO,  0xe3, struct kvm_device_attr)
 
 #define KVM_CREATE_PLANE	  _IO(KVMIO, 0xe4)
+#define KVM_GET_PLANE_RUN_STATE	  _IOR(KVMIO, 0xe5, __u32)
+#define KVM_SET_PLANE_RUN_STATE	  _IOW(KVMIO, 0xe6, __u32)
+
+/* Map one page of userspace memory over a GPA for a single plane (VSM
+ * overlay pages: SynIC SIMP/SIEFP, hypercall page, VP assist page). */
+struct kvm_plane_memory_overlay {
+	__u32 plane;
+	__u32 flags;
+	__u64 gfn;
+	__u64 uaddr;		/* page-aligned; 0 removes the overlay */
+};
+#define KVM_SET_PLANE_MEMORY_OVERLAY	  _IOW(KVMIO, 0xe7, struct kvm_plane_memory_overlay)
+#define   KVM_PLANE_RUN_STATE_STOPPED	0
+#define   KVM_PLANE_RUN_STATE_RUNNABLE	1
+#define   KVM_PLANE_RUN_STATE_KERNEL_STOPPED	2
 
 /*
  * ioctls for vcpu fds
@@ -1652,6 +1722,24 @@ struct kvm_memory_attributes {
 	__u64 flags;
 };
 
+/* Available with KVM_CAP_GUEST_MEMFD_MEMORY_ATTRIBUTES */
+#define KVM_SET_MEMORY_ATTRIBUTES2              _IOWR(KVMIO,  0xd2, struct kvm_memory_attributes2)
+
+struct kvm_memory_attributes2 {
+	union {
+		__u64 address;
+		__u64 offset;
+	};
+	__u64 size;
+	__u64 attributes;
+	__u64 flags;
+	__u64 error_offset;
+	__u64 reserved[11];
+};
+
+#define KVM_MEMORY_ATTRIBUTE_NR		       (1ULL << 0)
+#define KVM_MEMORY_ATTRIBUTE_NW		       (1ULL << 1)
+#define KVM_MEMORY_ATTRIBUTE_NX		       (1ULL << 2)
 #define KVM_MEMORY_ATTRIBUTE_PRIVATE           (1ULL << 3)
 
 #define KVM_CREATE_GUEST_MEMFD	_IOWR(KVMIO,  0xd4, struct kvm_create_guest_memfd)
