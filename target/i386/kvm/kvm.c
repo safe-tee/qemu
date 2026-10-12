@@ -1138,6 +1138,14 @@ static struct {
              .bits = HV_HYPERCALL_XMM_INPUT_AVAILABLE}
         }
     },
+    [HYPERV_FEAT_XMM_OUTPUT] = {
+        .desc = "XMM fast hypercall output (hv-xmm-output)",
+        .flags = {
+            {.func = HV_CPUID_FEATURES, .reg = R_EDX,
+             .bits = HV_HYPERCALL_XMM_OUTPUT_AVAILABLE}
+        },
+        .dependencies = BIT(HYPERV_FEAT_XMM_INPUT)
+    },
     [HYPERV_FEAT_TLBFLUSH_EXT] = {
         .desc = "Extended gva ranges for TLB flush hypercalls (hv-tlbflush-ext)",
         .flags = {

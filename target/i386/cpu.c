@@ -10764,6 +10764,8 @@ static const Property x86_cpu_properties[] = {
                       HYPERV_FEAT_MSR_BITMAP, 0),
     DEFINE_PROP_BIT64("hv-xmm-input", X86CPU, hyperv_features,
                       HYPERV_FEAT_XMM_INPUT, 0),
+    DEFINE_PROP_BIT64("hv-xmm-output", X86CPU, hyperv_features,
+                      HYPERV_FEAT_XMM_OUTPUT, 0),
     DEFINE_PROP_BIT64("hv-tlbflush-ext", X86CPU, hyperv_features,
                       HYPERV_FEAT_TLBFLUSH_EXT, 0),
     DEFINE_PROP_BIT64("hv-tlbflush-direct", X86CPU, hyperv_features,

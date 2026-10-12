@@ -242,6 +242,14 @@ Existing enlightenments
   registers ("XMM Fast Hypercall Input"). When the feature is in use, it allows
   for faster hypercalls processing as KVM can avoid reading guest's memory.
 
+``hv-xmm-output``
+  Hyper-V specification allows certain hypercalls to return data in XMM
+  registers ("XMM Fast Hypercall Output"). The reference host advertises
+  it, and the Windows secure kernel uses the fast forms of the VSM
+  register hypercalls when it is present.
+
+  Requires: ``hv-xmm-input``
+
 ``hv-tlbflush-ext``
   Allow for extended GVA ranges to be passed to Hyper-V TLB flush hypercalls
   (HvFlushVirtualAddressList/HvFlushVirtualAddressListEx).
