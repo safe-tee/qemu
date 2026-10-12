@@ -1598,6 +1598,13 @@ static int set_one_register(struct hv_vsm *vsm, uint32_t vp, uint8_t vtl,
          * TLFS: DefaultVtlProtectionMask is fixed when the VTL is
          * enabled and cannot be changed afterwards; later writes keep
          * the original mask.
+         *
+         * The bits beyond the protection controls are stored and read
+         * back but not acted on.  In particular ZeroMemoryOnReset
+         * (bit 5) does NOT scrub guest RAM on a partition reset here:
+         * hv_vsm_reset() clears the whole word without consulting it,
+         * so a secure kernel's secrets can survive a reboot in RAM.
+         * The reference hypervisor honours the bit.
          */
         if (vsm->partition_config[vtl]) {
             cfg = (cfg & ~(uint64_t)HV_VSM_PARTITION_CONFIG_DEFAULT_PROT_MASK) |
