@@ -1839,25 +1839,37 @@ static uint64_t do_set_vp_registers(struct hv_vsm *vsm, uint32_t caller,
         return mkstatus(HV_VSM_STATUS_ACCESS_DENIED, 0);
     }
 
+    /*
+     * The fast form packs the names four to an XMM register and the values
+     * one per XMM register after them (the layout the reference host
+     * parses), so at most four registers fit and no continuation is
+     * possible.
+     */
+    if (fast && (rep_idx != 0 || rep_cnt > 4)) {
+        return mkstatus(HV_VSM_STATUS_INVALID_HYPERCALL_INPUT, 0);
+    }
+
     for (done = rep_idx; done < rep_cnt; done++) {
         struct hv_vsm_register_assoc assoc;
         uint64_t val[2];
         int status;
 
         if (fast) {
-            if ((done + 1) * sizeof(assoc) > 6 * 16) {
-                return mkstatus(HV_VSM_STATUS_INVALID_HYPERCALL_INPUT, done);
+            int name_regs = (rep_cnt * 4 + 15) / 16;
+
+            memcpy(&assoc.name, (const char *)xmm_in->xmm + done * 4, 4);
+            memcpy(val, (const char *)xmm_in->xmm + (name_regs + done) * 16,
+                   16);
+        } else {
+            if (vsm->ops->guest_read(vsm->vm, in_gpa + sizeof(hdr) +
+                                     done * sizeof(assoc), &assoc,
+                                     sizeof(assoc))) {
+                return mkstatus(HV_VSM_STATUS_INVALID_ALIGNMENT, done);
             }
-            memcpy(&assoc, (const char *)xmm_in->xmm + done * sizeof(assoc),
-                   sizeof(assoc));
-        } else if (vsm->ops->guest_read(vsm->vm, in_gpa + sizeof(hdr) +
-                                        done * sizeof(assoc), &assoc,
-                                        sizeof(assoc))) {
-            return mkstatus(HV_VSM_STATUS_INVALID_ALIGNMENT, done);
+            val[0] = assoc.value_low;
+            val[1] = assoc.value_high;
         }
 
-        val[0] = assoc.value_low;
-        val[1] = assoc.value_high;
         status = set_one_register(vsm, vp, target_vtl, assoc.name, val);
         if (status) {
             return mkstatus(status, done);
