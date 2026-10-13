@@ -583,14 +583,17 @@ static int switch_vtl(struct hv_vsm *vsm, uint32_t vp, int from, int to)
 static void assert_sint0(struct hv_vsm *vsm, uint8_t vtl, uint32_t vp)
 {
     uint64_t sint0 = 0;
+    uint64_t mda = vp;
 
     if (!vsm->ops->assert_interrupt ||
         vsm->ops->vcpu_get_msr(vsm->vm, vtl, vp, HV_VSM_MSR_SINT0, &sint0) ||
         (sint0 & HV_VSM_SINT_MASKED)) {
         return;
     }
-    /* vp index == APIC ID in the configurations we run */
-    vsm->ops->assert_interrupt(vsm->vm, vtl, vp, sint0 & 0xff, 0, false);
+    if (vsm->ops->apic_id_from_vp) {
+        mda = vsm->ops->apic_id_from_vp(vsm->vm, vp);
+    }
+    vsm->ops->assert_interrupt(vsm->vm, vtl, mda, sint0 & 0xff, 0, false);
 }
 
 /* Write into a plane's SIMP: the overlay buffer when installed, else RAM. */

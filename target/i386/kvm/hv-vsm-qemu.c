@@ -651,6 +651,18 @@ int kvm_hv_vsm_handle_synic_exit(X86CPU *cpu, uint32_t plane,
                                         NULL);
 }
 
+static uint64_t vsm_apic_id_from_vp(void *vm, uint32_t vp)
+{
+    CPUState *cs;
+
+    CPU_FOREACH(cs) {
+        if (hyperv_vp_index(cs) == vp) {
+            return X86_CPU(cs)->apic_id;
+        }
+    }
+    return vp;
+}
+
 static int64_t vsm_vp_from_apic_id(void *vm, uint32_t apic_id)
 {
     CPUState *cs;
@@ -934,6 +946,7 @@ static const struct hv_vsm_host_ops vsm_qemu_ops = {
     .vcpu_translate = vsm_vcpu_translate,
     .assert_interrupt = vsm_assert_interrupt,
     .vp_from_apic_id = vsm_vp_from_apic_id,
+    .apic_id_from_vp = vsm_apic_id_from_vp,
     .vp_is_bsp = vsm_vp_is_bsp,
     .overlay_ptr = vsm_overlay_ptr,
     .vcpu_queue_exception = vsm_vcpu_queue_exception,

@@ -447,6 +447,13 @@ struct hv_vsm_host_ops {
     int (*assert_interrupt)(void *vm, uint8_t vtl, uint64_t dest_mda,
                             uint32_t vector, uint32_t type, bool logical);
     int64_t (*vp_from_apic_id)(void *vm, uint32_t apic_id);
+    /*
+     * APIC ID for a VP index.  Optional: a NULL op keeps the
+     * vp-index-equals-APIC-ID assumption; a VMM whose APIC IDs encode
+     * topology must provide it so SINT notifications reach the right
+     * processor.
+     */
+    uint64_t (*apic_id_from_vp)(void *vm, uint32_t vp);
 
     /* True if vp is the partition's boot processor. */
     bool (*vp_is_bsp)(void *vm, uint32_t vp);
