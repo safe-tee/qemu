@@ -164,6 +164,7 @@
 #define HV_VSM_MSR_APIC_BASE            0x0000001b
 #define HV_VSM_MSR_SINT0                0x40000090
 #define HV_VSM_SINT_MASKED              (1u << 16)
+#define HV_VSM_SINT_AUTO_EOI            (1ULL << 17)
 #define HV_VSM_APIC_BASE_BSP            (1ULL << 8)
 #define HV_VSM_MSR_VP_ASSIST_ENABLE     0x1
 

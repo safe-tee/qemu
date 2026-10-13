@@ -590,6 +590,15 @@ static void assert_sint0(struct hv_vsm *vsm, uint8_t vtl, uint32_t vp)
         (sint0 & HV_VSM_SINT_MASKED)) {
         return;
     }
+    /*
+     * AutoEOI SINTs are not implemented: the vector is asserted through
+     * the APIC and stays in ISR until the guest EOIs, which an AutoEOI
+     * guest never does.  Windows avoids AutoEOI when
+     * HV_DEPRECATING_AEOI_RECOMMENDED is set (QEMU: hv-avic).
+     */
+    if (sint0 & HV_VSM_SINT_AUTO_EOI) {
+        vsm_log(vsm, "unimplemented AutoEOI SINT, sint0", sint0);
+    }
     if (vsm->ops->apic_id_from_vp) {
         mda = vsm->ops->apic_id_from_vp(vsm->vm, vp);
     }
