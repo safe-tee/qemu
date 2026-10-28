@@ -3591,6 +3591,23 @@ int kvm_arch_init(MachineState *ms, KVMState *s)
     }
 
     /* Exit to userspace for VM-plane config/activate hypercalls (LVBS). */
+    s->vm_planes_max = 0;
+    if (!ms->cgs) {
+        int max = MIN(kvm_check_extension(s, KVM_CAP_PLANES), KVM_MAX_PLANES);
+
+        if (max > 1) {
+            ret = kvm_vm_enable_cap(s, KVM_CAP_PLANES, 0, max);
+            if (ret < 0 && ret != -EINVAL) {
+                error_report("kvm: failed to enable VM planes: %s",
+                             strerror(-ret));
+                return ret;
+            }
+            if (!ret) {
+                s->vm_planes_max = max;
+            }
+        }
+    }
+
     if (!kvm_enable_hypercall(BIT_ULL(KVM_HC_VM_PLANES_CONFIG) |
                               BIT_ULL(KVM_HC_VM_PLANES_ACTIVATE))) {
         warn_report("kvm: failed to enable VM-planes hypercall exit");
