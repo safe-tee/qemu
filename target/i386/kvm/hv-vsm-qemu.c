@@ -774,10 +774,14 @@ static int vsm_queue_exception_env_fn(void *opaque)
      */
     kvm_cpu_synchronize_state(x->cs);
     if (getenv("VSM_DEBUG")) {
-        fprintf(stderr, "vsm-ev0env: vcpu%d eip=%llx rax=%llx dirty-pre=%d vec=0x%x\n",
+        fprintf(stderr, "vsm-ev0env: vcpu%d eip=%llx rax=%llx dirty-pre=%d vec=0x%x smm=%d cs=%x/%llx cr0=%llx idt=%llx/%x\n",
                 x->cs->cpu_index, (unsigned long long)env->eip,
                 (unsigned long long)env->regs[R_EAX],
-                cpu_active_kvm_plane(x->cs)->vcpu_dirty, x->vector);
+            cpu_active_kvm_plane(x->cs)->vcpu_dirty, x->vector,
+            !!(env->hflags & HF_SMM_MASK), env->segs[R_CS].selector,
+            (unsigned long long)env->segs[R_CS].base,
+            (unsigned long long)env->cr[0],
+            (unsigned long long)env->idt.base, env->idt.limit);
     }
     env->exception_nr = x->vector;
     env->exception_pending = 1;
@@ -974,6 +978,7 @@ static void vsm_glue_reset(void *opaque)
     for (uint32_t vp = 0; vp < vsm_glue.nr_vps; vp++) {
         if (vsm_glue.plane1_vcpu_fd[vp] >= 0) {
             vsm_vcpu_set_run_state(&vsm_glue, 1, vp, false);
+            vsm_vcpu_set_run_state(&vsm_glue, 0, vp, true);
         }
     }
     qemu_mutex_unlock(&vsm_glue.lock);
